@@ -248,8 +248,8 @@ getVersions() {
         ${bowtie2PATH} --version >> LabNotebook.txt
     echo -e "\nDiamond: " >> LabNotebook.txt
         ${diamondPATH} -v >> LabNotebook.txt
-    echo -e "\nHUMAnN2: " >> LabNotebook.txt
-        ${humann2PATH} --version >> LabNotebook.txt
+   # echo -e "\nHUMAnN2: " >> LabNotebook.txt
+    #    ${humann2PATH} --version >> LabNotebook.txt
 }
 
 ## Use Trimmomatic to trim the raw input reads
@@ -506,7 +506,7 @@ metaphlanProfile() {
         echo -e "\tMetaPhlAn: Error. Pipeline stopped" >> LabNotebook.txt
         exit 1
     else
-        echo -e "\MetaPhlAn: Completed" >> LabNotebook.txt
+        echo -e "\nMetaPhlAn: Completed" >> LabNotebook.txt
     fi
     
 }
