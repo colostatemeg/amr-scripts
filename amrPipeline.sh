@@ -12,12 +12,12 @@
 # 5. Use SamRatio to calculate number of AMR gene hits
 # 6. Run Kraken on the non-bovine fastqs (Optional)
 # 7. Run MetaPhlAn on the non-bovine fastqs (Optional)
-# 8. Run HUMAnN2 on t he non-bovine fastqs (Optional)
+# 8. Run HUMAnN2 on t he non-bovine fastqs (Optional), not yet implemented
 
 # Dependencies:
 
 # Contact: Steven Lakin (Steven.Lakin@colostate.edu)
-# Last Updated: Sept 1 2015
+# Last Updated: Sept 8 2015
 
 ########
 # Help #
@@ -60,6 +60,7 @@ displayHelp () {
 ## The below are default paths to the tools at the time this script was
 ## written.  They will need to be changed manually if the paths change.
 ## The script will check for correct paths before running.
+## Be sure to use terminal slashes for directories.
 trimmPATH="/s/bovine/e/nobackup/common/tools/Trimmomatic-0-1.32/"
 krakenPATH="/usr/local/kraken/kraken"
 krakenDatabasePATH="/s/bovine/f/nobackup/databases/kraken_databases/Standard_kraken_10.14.db"
@@ -68,6 +69,10 @@ hostGenomePATH="/s/bovine/f/nobackup/databases/bwa_indexes/mod_bos_taurus/mod_bo
 AMRdatabasePATH="/s/bovine/f/nobackup/databases/resistance_databases/master_AMRdb.fa"
 AMRindexedPATH="/s/bovine/f/nobackup/databases/bwa_indexes/master_AMRdb/master_AMRdb.fa"
 samRatioPATH="/s/bovine/e/nobackup/common/tools/samratio.jar"
+bowtie2PATH="/s/bovine/index/tools/bin/bowtie2/bowtie2"
+metaphlanPATH="/s/bovine/index/tools/bin/metaphlan2/"
+humann2PATH="/s/bovine/index/tools/bin/humann2/humann2/humann2.py"
+diamondPATH="/s/bovine/index/tools/bin/diamond"
 
 ## These flags determine if the kraken, metaphlan, and humann2 pipelines
 ## are run.  The keep flag determines if intermediate files are kept.
@@ -108,6 +113,10 @@ validatePaths() {
     AMR Database:           ${AMRdatabasePATH}
     Indexed AMR Database:   ${AMRindexedPATH}
     Sam Ratio:              ${samRatioPATH}
+    MetaPhlAn:              ${metaphlanPATH}
+    bowtie2:                ${bowtie2PATH}
+    HUMAnN2:                ${humann2PATH}
+    Diamond:                ${diamondPATH}
     
     Directories selected:
     Trimmed output:         ${output_dir_trimmed}
@@ -115,6 +124,7 @@ validatePaths() {
     Non-host output:        ${output_dir_nonhost}
     Kraken output:          ${output_kraken}
     MetaPhlAn output:       ${output_metaphlan}
+    HUMAnN2 output          ${output_humann2}
     Logfile:                ${logfile}
     
     Validating....
@@ -153,6 +163,22 @@ validatePaths() {
         local missing="$missing:SamRatio;"
     fi
     
+    if [ ! -e "${humann2PATH}" ]; then
+        local missing="$missing:HUMAnN2;"
+    fi
+    
+    if [ ! -e "${diamondPATH}" ]; then
+        local missing="$missing:Diamond;"
+    fi
+    
+    if [ ! -e "${bowtie2PATH}" ]; then
+        local missing="$missing:bowtie2;"
+    fi
+    
+    if [ ! -d "${metaphlanPATH}" ]; then
+        local missing="$missing:MetaPhlAn;"
+    fi
+    
     if [ ! -d "${output_dir_trimmed}" ]; then
         local missing="$missing:TrimmedOutputDir;"
     fi
@@ -171,6 +197,10 @@ validatePaths() {
     
     if [ ! -d "${output_metaphlan}" ] && [ $metaphlanflag == "True" ]; then
         local missing="$missing:MetaphlanOutputDir;"
+    fi
+    
+    if [ ! -d "${output_humann2}" ] && [ $humann2flag == "True" ]; then
+        local missing="$missing:HUMAnN2OutputDir;"
     fi
     
     ## Check if components are missing
@@ -212,251 +242,299 @@ getVersions() {
         head ${hostGenomePATH} | grep ">" >> LabNotebook.txt
     echo -e "\nSamRatio: " >> LabNotebook.txt
         java -jar ${samRatioPATH} -v >> LabNotebook.txt
+    echo -e "\nMetaPhlAn2: " >> LabNotebook.txt
+        ${metaphlanPATH}metaphlan2.py -v >> LabNotebook.txt
+    echo -e "\nbowtie2: " >> LabNotebook.txt
+        ${bowtie2PATH} --version >> LabNotebook.txt
+    echo -e "\nDiamond: " >> LabNotebook.txt
+        ${diamondPATH} -v >> LabNotebook.txt
+    echo -e "\nHUMAnN2: " >> LabNotebook.txt
+        ${humann2PATH} --version >> LabNotebook.txt
 }
 
 ## Use Trimmomatic to trim the raw input reads
 trimmomatic() {
-local fullpath="$1"
-local shortpath="$2"
-
-if [ -e "${fullpath}"R1.fastq.gz ] && [ -e "${fullpath}"R2.fastq.gz ]; then
-    java -jar "${trimmPATH}trimmomatic-0.32.jar" PE -threads "${threads}" -phred33 "${fullpath}"R1.fastq.gz "${fullpath}"R2.fastq.gz "${output_dir_trimmed}${shortpath}"1P.fastq "${output_dir_trimmed}${shortpath}"1U.fastq "${output_dir_trimmed}${shortpath}"2P.fastq "${output_dir_trimmed}${shortpath}"2U.fastq ILLUMINACLIP:"${trimmPATH}adapters/TruSeq3-PE.fa:2:30:10:3:TRUE" LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
-else
-    echo -e "\nerror: please enter a valid fastq file path\n"
-    echo -e "\tTrimmomatic: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-fi
-
-if [ ! -e ${output_dir_trimmed}${shortpath}1P.fastq ] || [ ! -e ${output_dir_trimmed}${shortpath}1U.fastq ] || [ ! -e ${output_dir_trimmed}${shortpath}2P.fastq ] || [ ! -e ${output_dir_trimmed}${shortpath}2U.fastq ]; then
-    echo -e "\nTrimmomatic did not complete properly for sample ${shortpath}\n"
-    echo -e "\tTrimmomatic: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tTrimmomatic: Completed" >> LabNotebook.txt
-fi
+    local fullpath="$1"
+    local shortpath="$2"
+    
+    if [ -e "${fullpath}"R1.fastq.gz ] && [ -e "${fullpath}"R2.fastq.gz ]; then
+        java -jar "${trimmPATH}trimmomatic-0.32.jar" PE -threads "${threads}" -phred33 "${fullpath}"R1.fastq.gz "${fullpath}"R2.fastq.gz "${output_dir_trimmed}${shortpath}"1P.fastq "${output_dir_trimmed}${shortpath}"1U.fastq "${output_dir_trimmed}${shortpath}"2P.fastq "${output_dir_trimmed}${shortpath}"2U.fastq ILLUMINACLIP:"${trimmPATH}adapters/TruSeq3-PE.fa:2:30:10:3:TRUE" LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+    else
+        echo -e "\nerror: please enter a valid fastq file path\n"
+        echo -e "\tTrimmomatic: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    fi
+    
+    if [ ! -e ${output_dir_trimmed}${shortpath}1P.fastq ] || [ ! -e ${output_dir_trimmed}${shortpath}1U.fastq ] || [ ! -e ${output_dir_trimmed}${shortpath}2P.fastq ] || [ ! -e ${output_dir_trimmed}${shortpath}2U.fastq ]; then
+        echo -e "\nTrimmomatic did not complete properly for sample ${shortpath}\n"
+        echo -e "\tTrimmomatic: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tTrimmomatic: Completed" >> LabNotebook.txt
+    fi
 }
 
 ## Use BWA aln to filter host dna from trimmed fastqs
 hostfilter() {
-local shortpath="$1"
-if [ ! -d intermediate_files ]; then
-    mkdir intermediate_files
-fi
-
-if [ ! -e intermediate_files/${shortpath}f.sai ] || [ ! -e intermediate_files/${shortpath}r.sai ]; then
-    bwa aln ${hostGenomePATH} ${output_dir_trimmed}${shortpath}1P.fastq -t ${threads} > intermediate_files/${shortpath}f.sai
-    bwa aln ${hostGenomePATH} ${output_dir_trimmed}${shortpath}2P.fastq -t ${threads} > intermediate_files/${shortpath}r.sai
-elif [ -e intermediate_files/${shortpath}f.sai ] && [ -e intermediate_files/${shortpath}r.sai ]; then
-    echo -e "\n.sai files already present for sample ${shortpath}.  Proceeding with bwa sampe..."
-else
-    echo -e "\nNon-specific error in bwa aln for Host Filtering. Check syntax (shell script)\n"
-    echo -e "\tHost Filtering, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-fi
-
-if [ ! -e intermediate_files/${shortpath}f.sai ] || [ ! -e intermediate_files/${shortpath}r.sai ]; then
-    echo -e "\nbwa aln for host filtering did not complete properly for sample ${shortpath}\n"
-    echo -e "\tHost Filtering, bwa aln: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tHost Filtering, bwa aln: Completed" >> LabNotebook.txt
-fi
-
-if [ ! -e intermediate_files/${shortpath}cow.sam ]; then
-    bwa sampe ${hostGenomePATH} intermediate_files/${shortpath}f.sai intermediate_files/${shortpath}r.sai ${output_dir_trimmed}${shortpath}1P.fastq ${output_dir_trimmed}${shortpath}2P.fastq > intermediate_files/${shortpath}cow.sam
-elif [ -e intermediate_files/${shortpath}cow.sam ]; then
-    echo -e "\nSAM file already present for sample ${shortpath}.  Proceeding with conversion to BAM...\n"
-else
-    echo -e "\nNon-specific error in bwa sampe for Host Filtering.  Check syntax (shell script)\n"
-    echo -e "\tHost Filtering, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-fi
-
-if [ ! -e intermediate_files/${shortpath}cow.sam ]; then
-    echo -e "\nbwa sampe for host filtering did not complete properly for sample ${shortpath}\n"
-    echo -e "\tHost Filtering, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tHost Filtering, bwa sampe: Completed" >> LabNotebook.txt
-fi
-
-if [ ! -e intermediate_files/${shortpath}cow.bam ]; then
-    samtools view -hbS intermediate_files/${shortpath}cow.sam > intermediate_files/${shortpath}cow.bam
-elif [ -e intermediate_files/${shortpath}cow.bam ]; then
-    echo -e "\nBAM file already present for sample ${shortpath}.  Proceeding with BAM sorting...\n"
-else
-    echo -e "\nNon-specific error in SAM to BAM conversion for Host Filtering.  Check syntax (shell script)\n"
-    echo -e "\tHost Filtering, samtools view: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-fi
-
-if [ ! -e intermediate_files/${shortpath}cow.bam ]; then
-    echo -e "\nSAM to BAM conversion for host filtering  did not complete properly for sample ${shortpath}\n"
-    echo -e "\tHost Filtering, samtools view: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tHost Filtering, samtools view: Completed" >> LabNotebook.txt
-fi
-
-if [ ! -e intermediate_files/${shortpath}sorted_cow.bam ]; then
-    samtools sort intermediate_files/${shortpath}cow.bam intermediate_files/${shortpath}sorted_cow
-elif [ -e intermediate_files/${shortpath}sorted_cow.bam ]; then
-    echo -e "\nBAM file already present for sample ${shortpath}. Proceeding with host DNA removal..."
-else
-    echo -e "\nNon-specific error in BAM sorting for Host Filtering. Check syntax (shell script)\n"
-    echo -e "\tHost Filtering, samtools sort: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-fi
-
-if [ ! -e intermediate_files/${shortpath}sorted_cow.bam ]; then
-    echo -e "\nsamtools sort for host filtering did not complete properly for sample ${shortpath}\n"
-    echo -e "\tHost Filtering, samtools sort: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tHost Filtering, samtools sort: Completed" >> LabNotebook.txt
-fi
-
-if [ ! -e intermediate_files/${shortpath}sorted_noncow.bam ]; then
-    samtools view -h -f 4 -b intermediate_files/${shortpath}sorted_cow.bam > intermediate_files/${shortpath}sorted_noncow.bam
-elif [ -e intermediate_files/${shortpath}sorted_noncow.bam ]; then
-    echo -e "\nFiltered BAM already present for sample ${shortpath}. Proceeding with fastq conversion..."
-else
-    echo -e "\nNonspecific error in BAM filtering for Host Filtering. Check syntax (shell script)\n"
-    echo -e "\tHost Filtering, samtools host removal: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-fi
-
-if [ ! -e intermediate_files/${shortpath}sorted_noncow.bam ]; then
-    echo -e "\nsamtools host DNA removal did not complete properly for sample ${shortpath}\n"
-    echo -e "\tHost Filtering, samtools host removal: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tHost Filtering, samtools host removal: Completed" >> LabNotebook.txt
-fi
-
-if [ ! -e ${output_dir_nonhost}${shortpath}noncow_2p.fastq ] || [ ! -e ${output_dir_nonhost}${shortpath}noncow_1p.fastq ]; then
-    ${bamToFastqPATH} -i intermediate_files/${shortpath}sorted_noncow.bam -fq ${output_dir_nonhost}${shortpath}noncow_1p.fastq -fq2 ${output_dir_nonhost}${shortpath}noncow_2p.fastq
-elif [ -e ${output_dir_nonhost}${shortpath}noncow_2p.fastq ] && [ -e ${output_dir_nonhost}${shortpath}noncow_1p.fastq ]; then
-    echo -e "\nConverted fastqs already present for sample ${shortpath}. Proceeding with AMR pipeline..."
-else
-    echo -e "\nNon-specific error in BAM to fastq conversion. Check syntax (shell script)\n"
-    echo -e "\tHost Filtering, bamToFastq: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-fi
-
-if [ ! -e ${output_dir_nonhost}${shortpath}noncow_2p.fastq ] || [ ! -e ${output_dir_nonhost}${shortpath}noncow_1p.fastq ]; then
-    echo -e "\nBAM to fastq conversion during host removal did not complete properly for sample ${shortpath}\n"
-    echo -e "\tHost Filtering, bamToFastq: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tHost Filtering, bamToFastq: Completed" >> LabNotebook.txt
-fi
-
-mv intermediate_files/${shortpath}sorted_noncow.bam bam_files/
-
-if [ ! $keep == "keep" ]; then
-    rm intermediate_files/${shortpath}f.sai
-    rm intermediate_files/${shortpath}r.sai
-    rm intermediate_files/${shortpath}cow.sam
-    rm intermediate_files/${shortpath}cow.bam
-    rm intermediate_files/${shortpath}sorted_cow.bam
-fi
+    local shortpath="$1"
+    
+    if [ ! -d intermediate_files ]; then
+        mkdir intermediate_files
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}f.sai ] || [ ! -e intermediate_files/${shortpath}r.sai ]; then
+        bwa aln ${hostGenomePATH} ${output_dir_trimmed}${shortpath}1P.fastq -t ${threads} > intermediate_files/${shortpath}f.sai
+        bwa aln ${hostGenomePATH} ${output_dir_trimmed}${shortpath}2P.fastq -t ${threads} > intermediate_files/${shortpath}r.sai
+    elif [ -e intermediate_files/${shortpath}f.sai ] && [ -e intermediate_files/${shortpath}r.sai ]; then
+        echo -e "\n.sai files already present for sample ${shortpath}.  Proceeding with bwa sampe..."
+    else
+        echo -e "\nNon-specific error in bwa aln for Host Filtering. Check syntax (shell script)\n"
+        echo -e "\tHost Filtering, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}f.sai ] || [ ! -e intermediate_files/${shortpath}r.sai ]; then
+        echo -e "\nbwa aln for host filtering did not complete properly for sample ${shortpath}\n"
+        echo -e "\tHost Filtering, bwa aln: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tHost Filtering, bwa aln: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}cow.sam ]; then
+        bwa sampe ${hostGenomePATH} intermediate_files/${shortpath}f.sai intermediate_files/${shortpath}r.sai ${output_dir_trimmed}${shortpath}1P.fastq ${output_dir_trimmed}${shortpath}2P.fastq > intermediate_files/${shortpath}cow.sam
+    elif [ -e intermediate_files/${shortpath}cow.sam ]; then
+        echo -e "\nSAM file already present for sample ${shortpath}.  Proceeding with conversion to BAM...\n"
+    else
+        echo -e "\nNon-specific error in bwa sampe for Host Filtering.  Check syntax (shell script)\n"
+        echo -e "\tHost Filtering, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}cow.sam ]; then
+        echo -e "\nbwa sampe for host filtering did not complete properly for sample ${shortpath}\n"
+        echo -e "\tHost Filtering, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tHost Filtering, bwa sampe: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}cow.bam ]; then
+        samtools view -hbS intermediate_files/${shortpath}cow.sam > intermediate_files/${shortpath}cow.bam
+    elif [ -e intermediate_files/${shortpath}cow.bam ]; then
+        echo -e "\nBAM file already present for sample ${shortpath}.  Proceeding with BAM sorting...\n"
+    else
+        echo -e "\nNon-specific error in SAM to BAM conversion for Host Filtering.  Check syntax (shell script)\n"
+        echo -e "\tHost Filtering, samtools view: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}cow.bam ]; then
+        echo -e "\nSAM to BAM conversion for host filtering  did not complete properly for sample ${shortpath}\n"
+        echo -e "\tHost Filtering, samtools view: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tHost Filtering, samtools view: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}sorted_cow.bam ]; then
+        samtools sort intermediate_files/${shortpath}cow.bam intermediate_files/${shortpath}sorted_cow
+    elif [ -e intermediate_files/${shortpath}sorted_cow.bam ]; then
+        echo -e "\nBAM file already present for sample ${shortpath}. Proceeding with host DNA removal..."
+    else
+        echo -e "\nNon-specific error in BAM sorting for Host Filtering. Check syntax (shell script)\n"
+        echo -e "\tHost Filtering, samtools sort: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}sorted_cow.bam ]; then
+        echo -e "\nsamtools sort for host filtering did not complete properly for sample ${shortpath}\n"
+        echo -e "\tHost Filtering, samtools sort: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tHost Filtering, samtools sort: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}sorted_noncow.bam ]; then
+        samtools view -h -f 4 -b intermediate_files/${shortpath}sorted_cow.bam > intermediate_files/${shortpath}sorted_noncow.bam
+    elif [ -e intermediate_files/${shortpath}sorted_noncow.bam ]; then
+        echo -e "\nFiltered BAM already present for sample ${shortpath}. Proceeding with fastq conversion..."
+    else
+        echo -e "\nNonspecific error in BAM filtering for Host Filtering. Check syntax (shell script)\n"
+        echo -e "\tHost Filtering, samtools host removal: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}sorted_noncow.bam ]; then
+        echo -e "\nsamtools host DNA removal did not complete properly for sample ${shortpath}\n"
+        echo -e "\tHost Filtering, samtools host removal: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tHost Filtering, samtools host removal: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! -e ${output_dir_nonhost}${shortpath}noncow_2p.fastq ] || [ ! -e ${output_dir_nonhost}${shortpath}noncow_1p.fastq ]; then
+        ${bamToFastqPATH} -i intermediate_files/${shortpath}sorted_noncow.bam -fq ${output_dir_nonhost}${shortpath}noncow_1p.fastq -fq2 ${output_dir_nonhost}${shortpath}noncow_2p.fastq
+    elif [ -e ${output_dir_nonhost}${shortpath}noncow_2p.fastq ] && [ -e ${output_dir_nonhost}${shortpath}noncow_1p.fastq ]; then
+        echo -e "\nConverted fastqs already present for sample ${shortpath}. Proceeding with AMR pipeline..."
+    else
+        echo -e "\nNon-specific error in BAM to fastq conversion. Check syntax (shell script)\n"
+        echo -e "\tHost Filtering, bamToFastq: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    fi
+    
+    if [ ! -e ${output_dir_nonhost}${shortpath}noncow_2p.fastq ] || [ ! -e ${output_dir_nonhost}${shortpath}noncow_1p.fastq ]; then
+        echo -e "\nBAM to fastq conversion during host removal did not complete properly for sample ${shortpath}\n"
+        echo -e "\tHost Filtering, bamToFastq: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tHost Filtering, bamToFastq: Completed" >> LabNotebook.txt
+    fi
+    
+    mv intermediate_files/${shortpath}sorted_noncow.bam bam_files/
+    
+    if [ ! $keep == "keep" ]; then
+        rm intermediate_files/${shortpath}f.sai
+        rm intermediate_files/${shortpath}r.sai
+        rm intermediate_files/${shortpath}cow.sam
+        rm intermediate_files/${shortpath}cow.bam
+        rm intermediate_files/${shortpath}sorted_cow.bam
+    fi
 }
 
 ## Use BWA aln to align the nonhost reads against the AMR master database
 amrAlign() {
-local shortpath="$1"
-if [ ! -d intermediate_files ]; then
-    mkdir intermediate_files
-fi
-
-if [ ! -e intermediate_files/${shortpath}f_amr.sai ] && [ ! -e intermediate_files/${shortpath}r_amr.sai ]; then
-    bwa aln ${AMRindexedPATH} ${output_dir_nonhost}${shortpath}noncow_1p.fastq -t ${threads} > intermediate_files/${shortpath}f_amr.sai
-    bwa aln ${AMRindexedPATH} ${output_dir_nonhost}${shortpath}noncow_2p.fastq -t ${threads} > intermediate_files/${shortpath}r_amr.sai
-else
-    echo -e "\n.sai files already present for sample ${shortpath}, proceeding with bwa sampe..."
-fi
-
-
-if [ ! -e intermediate_files/${shortpath}f_amr.sai ] || [ ! -e intermediate_files/${shortpath}r_amr.sai ]; then
-    echo -e "\nbwa aln did not complete properly for sample ${shortpath}\n"
-    echo -e "\tAMR, bwa aln: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tAMR, bwa aln: Completed" >> LabNotebook.txt
-fi
-
-if [ ! -e intermediate_files/${shortpath}AMR.sam ]; then
-    bwa sampe -n 1000 -N 1000 ${AMRindexedPATH} intermediate_files/${shortpath}f_amr.sai intermediate_files/${shortpath}r_amr.sai ${output_dir_nonhost}${shortpath}noncow_1p.fastq ${output_dir_nonhost}${shortpath}noncow_2p.fastq > intermediate_files/${shortpath}AMR.sam
-else
-    echo -e "\nSAM file already present for sample ${shortpath}, proceeding with BAM generation..."
-fi
-
-
-if [ ! -e intermediate_files/${shortpath}AMR.sam ]; then
-    echo -e "\nbwa sampe did not complete properly for sample ${shortpath}\n"
-    echo -e "\tAMR, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tAMR, bwa sampe: Completed" >> LabNotebook.txt
-fi
-
-if [ ! -e intermediate_files/${shortpath}AMR.bam ] && [ ! -e bam_files/${shortpath}AMR.bam ]; then
-    samtools view -hbS intermediate_files/${shortpath}AMR.sam > intermediate_files/${shortpath}AMR.bam
-else
-    echo -e "\n BAM file already present for sample ${shortpath}, proceeding wtih samratio..."
-fi
-
-
-java -jar ${samRatioPATH} -d ${AMRdatabasePATH} -i intermediate_files/${shortpath}AMR.sam -t 1 -m ${output_dir_amr}${shortpath}mismatch -o ${output_dir_amr}${shortpath}parsed
-
-mv intermediate_files/${shortpath}AMR.bam bam_files/
-
-if [ ! -e ${output_dir_amr}${shortpath}mismatch ] || [ ! -e ${output_dir_amr}${shortpath}parsed ]; then
-    echo -e "\nsamratio did not complete properly for sample ${shortpath}\n"
-    echo -e "\tAMR, SamRatio: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tAMR, SamRatio: Completed" >> LabNotebook.txt
-fi
-
-if [ ! $keep == "keep" ]; then
-    rm intermediate_files/${shortpath}f_amr.sai
-    rm intermediate_files/${shortpath}r_amr.sai
-    rm intermediate_files/${shortpath}AMR.sam
-fi
+    local shortpath="$1"
+    if [ ! -d intermediate_files ]; then
+        mkdir intermediate_files
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}f_amr.sai ] && [ ! -e intermediate_files/${shortpath}r_amr.sai ]; then
+        bwa aln ${AMRindexedPATH} ${output_dir_nonhost}${shortpath}noncow_1p.fastq -t ${threads} > intermediate_files/${shortpath}f_amr.sai
+        bwa aln ${AMRindexedPATH} ${output_dir_nonhost}${shortpath}noncow_2p.fastq -t ${threads} > intermediate_files/${shortpath}r_amr.sai
+    else
+        echo -e "\n.sai files already present for sample ${shortpath}, proceeding with bwa sampe..."
+    fi
+    
+    
+    if [ ! -e intermediate_files/${shortpath}f_amr.sai ] || [ ! -e intermediate_files/${shortpath}r_amr.sai ]; then
+        echo -e "\nbwa aln did not complete properly for sample ${shortpath}\n"
+        echo -e "\tAMR, bwa aln: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tAMR, bwa aln: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}AMR.sam ]; then
+        bwa sampe -n 1000 -N 1000 ${AMRindexedPATH} intermediate_files/${shortpath}f_amr.sai intermediate_files/${shortpath}r_amr.sai ${output_dir_nonhost}${shortpath}noncow_1p.fastq ${output_dir_nonhost}${shortpath}noncow_2p.fastq > intermediate_files/${shortpath}AMR.sam
+    else
+        echo -e "\nSAM file already present for sample ${shortpath}, proceeding with BAM generation..."
+    fi
+    
+    
+    if [ ! -e intermediate_files/${shortpath}AMR.sam ]; then
+        echo -e "\nbwa sampe did not complete properly for sample ${shortpath}\n"
+        echo -e "\tAMR, bwa sampe: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tAMR, bwa sampe: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! -e intermediate_files/${shortpath}AMR.bam ] && [ ! -e bam_files/${shortpath}AMR.bam ]; then
+        samtools view -hbS intermediate_files/${shortpath}AMR.sam > intermediate_files/${shortpath}AMR.bam
+    else
+        echo -e "\n BAM file already present for sample ${shortpath}, proceeding wtih samratio..."
+    fi
+    
+    
+    java -jar ${samRatioPATH} -d ${AMRdatabasePATH} -i intermediate_files/${shortpath}AMR.sam -t 1 -m ${output_dir_amr}${shortpath}mismatch -o ${output_dir_amr}${shortpath}parsed
+    
+    mv intermediate_files/${shortpath}AMR.bam bam_files/
+    
+    if [ ! -e ${output_dir_amr}${shortpath}mismatch ] || [ ! -e ${output_dir_amr}${shortpath}parsed ]; then
+        echo -e "\nsamratio did not complete properly for sample ${shortpath}\n"
+        echo -e "\tAMR, SamRatio: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tAMR, SamRatio: Completed" >> LabNotebook.txt
+    fi
+    
+    if [ ! $keep == "keep" ]; then
+        rm intermediate_files/${shortpath}f_amr.sai
+        rm intermediate_files/${shortpath}r_amr.sai
+        rm intermediate_files/${shortpath}AMR.sam
+    fi
 }
 
 ## Use Kraken to profile the mirobiome from the metagenomic reads
 krakenProfile() {
-local shortpath="$1"
-
-if [ ! -e ${output_kraken}${shortpath}kraken_output ]; then
-    ${krakenPATH} --preload --db ${krakenDatabasePATH} --threads ${threads} --fastq-input --paired ${output_dir_nonhost}${shortpath}noncow_1p.fastq ${output_dir_nonhost}${shortpath}noncow_2p.fastq > ${output_kraken}${shortpath}kraken_output
-else
-    echo -e "\nkraken output file already present for sample ${shortpath}, proceeding with report generation...\n"
-fi
-
-
-if [ ! -e ${output_kraken}${shortpath}kraken_output ]; then
-    echo -e "\nkraken did not complete properly for sample ${shortpath}\n"
-    echo -e "\tKraken, classify: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tKraken, classify: Completed" >> LabNotebook.txt
-fi
-
-${krakenPATH}-report -db ${krakenDatabasePATH} ${output_kraken}${shortpath}kraken_output > ${kraken_report}${shortpath}kraken_reports
-
-if [ ! -e ${kraken_report}${shortpath}kraken_reports ]; then
-    echo -e "\nkraken reports did not complete properly for sample ${shortpath}\n"
-    echo -e "\tKraken, report: Error. Pipeline stopped" >> LabNotebook.txt
-    exit 1
-else
-    echo -e "\tKraken, report: Completed" >> LabNotebook.txt
-fi
+    local shortpath="$1"
+    
+    if [ ! -e ${output_kraken}${shortpath}kraken_output ]; then
+        ${krakenPATH} --preload --db ${krakenDatabasePATH} --threads ${threads} --fastq-input --paired ${output_dir_nonhost}${shortpath}noncow_1p.fastq ${output_dir_nonhost}${shortpath}noncow_2p.fastq > ${output_kraken}${shortpath}kraken_output
+    else
+        echo -e "\nkraken output file already present for sample ${shortpath}, proceeding with report generation...\n"
+    fi
+    
+    
+    if [ ! -e ${output_kraken}${shortpath}kraken_output ]; then
+        echo -e "\nkraken did not complete properly for sample ${shortpath}\n"
+        echo -e "\tKraken, classify: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tKraken, classify: Completed" >> LabNotebook.txt
+    fi
+    
+    ${krakenPATH}-report -db ${krakenDatabasePATH} ${output_kraken}${shortpath}kraken_output > ${kraken_report}${shortpath}kraken_reports
+    
+    if [ ! -e ${kraken_report}${shortpath}kraken_reports ]; then
+        echo -e "\nkraken reports did not complete properly for sample ${shortpath}\n"
+        echo -e "\tKraken, report: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\tKraken, report: Completed" >> LabNotebook.txt
+    fi
 }
 
+metaphlanProfile() {
+    local shortpath="$1"
+    
+    ${metaphlanPATH}metaphlan2.py ${output_dir_nonhost}${shortpath}noncow_1p.fastq,${output_dir_nonhost}${shortpath}noncow_2p.fastq ${output_metaphlan}${shortpath}metaphlan_output.tsv --input_type fastq --bowtie2db ${metaphlanPATH}db_v20/mpa_v20_m200 --mpa_pkl ${metaphlanPATH}db_v20/mpa_v20_m200.pkl --bowtie2out ${output_metaphlan}${shortpath}.bowtie2.bz2 --bowtie2_exe ${bowtie2PATH} -t rel_ab_w_read_stats --nproc ${threads}
+    
+    if [ ! -e ${output_metaphlan}${shortpath}metaphlan_output.tsv ]; then
+        echo -e "\nmetaphlan did not complete properly for sample ${shortpath}\n"
+        echo -e "\tMetaPhlAn: Error. Pipeline stopped" >> LabNotebook.txt
+        exit 1
+    else
+        echo -e "\MetaPhlAn: Completed" >> LabNotebook.txt
+    fi
+    
+}
+
+#humann2Profile() {
+    
+#    local shortpath="$1"
+    
+    # This is not yet implemented due to I/O considerations.  Fastq files must be concatenated before analysis, which is significant computational time.
+    #${humann2PATH}
+    
+#}
+
+setPermissions() {
+    chmod 666 ${logfile} ${output_dir_trimmed}/* ${output_dir_nonhost}/* ${output_dir_amr}/* LabNotebook.txt
+    
+    if [ $krakenflag == "True" ]; then
+        chmod 666 ${output_kraken}/*output ${output_kraken}kraken_reports/*
+    fi
+    
+    if [ $metaphlanflag == "True" ] && [ $humann2flag == "False" ]; then
+        chmod 666 ${output_metaphlan}/*
+    fi
+    
+    if [ $humann2flag == "True" ]; then
+        chmod 666 ${output_humann2}/*.tsv ${output_humann2}/*humann2*/*
+    fi
+}
 
 ########
 # Main #
@@ -473,7 +551,7 @@ while [[ "${1+defined}"  ]]; do
             output_kraken="$2"
             kraken_report="$2kraken_reports/"
 	    if [ ! -d "${kraken_report}" ]; then
-		mkdir "${kraken_report}"
+		    mkdir "${kraken_report}"
 	    fi
             shift 2
             ;;
@@ -509,6 +587,10 @@ while [[ "${1+defined}"  ]]; do
 	-u | --humann2)
 	    humann2flag="True"
 	    output_humann2="$2"
+	    if [ $humann2flag == "True" ]; then
+	        echo -e "\nHUMAnN2 pipeline not yet implemented, ignoring..."
+	        humann2flag="False"
+	    fi
 	    shift 2
 	    ;;
 	-tr | --trimmed)
@@ -622,17 +704,42 @@ for i in ${!freads[*]}; do
             exit 1
         fi
     elif [ ${krakenflag} == "False" ]; then
-	echo -e "\nKraken flag is False, skipping kraken pipeline...\n"
-	echo -e "\tKraken: Flag is False, skipping..." >> LabNotebook.txt
+    	echo -e "\nKraken flag is False, skipping kraken pipeline...\n"
+    	echo -e "\tKraken: Flag is False, skipping..." >> LabNotebook.txt
     else
         echo -e "\nNon-specific error in Kraken pipeline (shell script).  Check the syntax.\n"
         echo -e "\tKraken: Error. Pipeline Stopped" >> LabNotebook.txt
         exit 1
     fi
 ## If the metaphlan flag is set, then run metaphlan on the nonhost fastqs, output to metaphlan folder in analysis/microbiome
-## If the humann2 flag is set, then run humann2 on the nonhost fastqs, output to analysis/pathways folder
+    if [ ${metaphlanflag} == "True" ] && [ -e ${output_metaphlan}${stem}metaphlan_output.tsv ]; then
+        echo -e "\nMetaPhlAn output file already exists for ${stem} samples.  Proceeding with next file...\n"
+        echo -e "\tMetaPhlAn: Completed Previously, skipping..." >> LabNotebook.txt
+    elif [ ${metaphlanflag} == "True" ] && [ ! -e ${output_dir_nonhost}${stem}noncow_1p.fastq ] || [ ! -e ${output_dir_nonhost}${stem}noncow_2p.fastq ]; then
+        echo -e "\nError in sample ${stem}, one or more noncow fastq files were not generated or do not exist\n"
+        echo -e "\tMetaPhlAn: Error. Pipeline Stopped" >> LabNotebook.txt
+    elif [ ${metaphlanflag} == "True" ] && [ -e ${output_dir_nonhost}${stem}noncow_1p.fastq ] && [ -e ${output_dir_nonhost}${stem}noncow_2p.fastq ]; then
+        metaphlanProfile $stem
+        if [ $? -ne 0 ]; then #Catch errors or SIGINTs
+            echo -e "Ctrl^C"
+            echo -e "\tMetaPhlAn: Error or Command Interrupt Ctrl^C" >> LabNotebook.txt
+            exit 1
+        fi
+    elif [ ${metaphlanflag} == "False" ]; then
+    	echo -e "\nMetaPhlAn: flag is False, skipping kraken pipeline...\n"
+    	echo -e "\tMetaPhlAn: Flag is False, skipping..." >> LabNotebook.txt
+    else
+        echo -e "\nNon-specific error in MetaPhlAn pipeline (shell script).  Check the syntax.\n"
+        echo -e "\tMetaPhlAn: Error. Pipeline Stopped" >> LabNotebook.txt
+        exit 1
+    fi
+## If the humann2 flag is set, then run humann2 on the nonhost fastqs, output to analysis/pathways folder -> not yet implemented
     echo -e "Successful completion for sample ${stem}" | sed 's/_$//g' >> LabNotebook.txt
 done
 echo -e "\nPipeline complete!\n"
 echo -e "\nPipeline complete!\n" >> LabNotebook.txt
+
+## Set permissions for output files to read/write access
+setPermissions
+
 exit 0
