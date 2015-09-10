@@ -248,8 +248,8 @@ getVersions() {
         ${bowtie2PATH} --version >> LabNotebook.txt
     echo -e "\nDiamond: " >> LabNotebook.txt
         ${diamondPATH} -v >> LabNotebook.txt
-    echo -e "\nHUMAnN2: " >> LabNotebook.txt
-        ${humann2PATH} --version >> LabNotebook.txt
+   # echo -e "\nHUMAnN2: " >> LabNotebook.txt
+    #    ${humann2PATH} --version >> LabNotebook.txt
 }
 
 ## Use Trimmomatic to trim the raw input reads
@@ -506,7 +506,7 @@ metaphlanProfile() {
         echo -e "\tMetaPhlAn: Error. Pipeline stopped" >> LabNotebook.txt
         exit 1
     else
-        echo -e "\MetaPhlAn: Completed" >> LabNotebook.txt
+        echo -e "\nMetaPhlAn: Completed" >> LabNotebook.txt
     fi
     
 }
@@ -534,6 +534,36 @@ setPermissions() {
     if [ $humann2flag == "True" ]; then
         chmod 666 ${output_humann2}/*.tsv ${output_humann2}/*humann2*/*
     fi
+}
+
+combineOutputs() {
+    echo -e "\nMerging Files...\n"
+    for i in ${!freads[*]}; do
+	local stem=${freads[$i]}
+	if [[ $stem == *"R2.fastq"* ]]; then
+	    continue
+	else
+	    local prefix=$( echo ${freads[$i]} | sed -r 's/_R1.fastq[A-Za-z0-9._\*]*//g' | sed -r 's/[A-Za-z0-9_.:\*-]*\///g' )
+	    echo -e "Merging files for sample ${prefix}" >> LabNotebook.txt
+	    sed 's/$/\t'"$prefix"'/g' ${output_kraken}${prefix}_kraken_output >> ${output_kraken}master_kraken.tsv
+	    sed 's/$/\t'"$prefix"'/g'  ${kraken_report}${prefix}_kraken_reports >> ${kraken_report}master_kraken_reports.tsv
+	    sed 's/$/\t'"$prefix"'/g' ${output_dir_amr}${prefix}_parsed >> ${output_dir_amr}master_amr_parsed.tsv
+	    sed 's/$/\t'"$prefix"'/g' ${output_dir_amr}${prefix}_mismatch >> ${output_dir_amr}master_amr_mismatch.tsv
+	    sed 's/$/\t'"$prefix"'/g' ${output_metaphlan}${prefix}_metaphlan_output.tsv >> ${output_metaphlan}master_metaphlan.tsv
+
+	fi
+    done   
+    echo -e "Merging Completed:"
+    echo "
+	${output_kraken}master_kraken.tsv
+	${kraken_report}master_kraken_reports.tsv
+	${output_dir_amr}master_amr_parsed.tsv
+	${output_dir_amr}master_amr_mismatch.tsv
+	
+	If metaphlan was run:
+	${output_metaphlan}master_metaphlan.tsv
+    "
+    echo -e "\nMerging complete for all files" >> LabNotebook.txt
 }
 
 ########
@@ -738,6 +768,11 @@ for i in ${!freads[*]}; do
 done
 echo -e "\nPipeline complete!\n"
 echo -e "\nPipeline complete!\n" >> LabNotebook.txt
+
+## Combine output reports
+if [ ! -e ${output_dir_amr}master_amr_mismatch.tsv ] || [ ! -e ${output_dir_amr}master_amr_parsed.tsv ] || [ ! -e ${output_kraken}master_kraken.tsv ] || [ ! -e ${kraken_report}master_kraken_reports.tsv ] || [ ! -e ${output_metaphlan}master_metaphlan.tsv ]; then
+    combineOutputs
+fi
 
 ## Set permissions for output files to read/write access
 setPermissions
