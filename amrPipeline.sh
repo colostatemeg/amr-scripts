@@ -2,7 +2,7 @@
 
 # Version: 1.00
 # Batch script for the MEG standard AMR pipeline
-# Optional integration of microbiome (Kraken, MetaPhlAn) and pathway (HUMAnN2) data
+# Optional integration of microbiome (Kraken, MetaPhlAn)
 
 # Workflow:
 # 1. Trim reads with Trimmomatic
@@ -12,7 +12,6 @@
 # 5. Use SamRatio to calculate number of AMR gene hits
 # 6. Run Kraken on the non-bovine fastqs (Optional)
 # 7. Run MetaPhlAn on the non-bovine fastqs (Optional)
-# 8. Run HUMAnN2 on t he non-bovine fastqs (Optional), not yet implemented
 
 # Dependencies:
 
@@ -39,7 +38,6 @@ displayHelp () {
         -t | --threads INT      number of threads to use [1]
 	-a | --kraken DIR	perform kraken analysis, output to a directory
 	-m | --metaphlan	perform metaphlan analysis, output to a directory
-	-u | --humann2		perform humann2 analysis, output to a directory
 
     Output options:
 
@@ -71,14 +69,11 @@ AMRindexedPATH="/s/bovine/f/nobackup/databases/bwa_indexes/master_AMRdb/master_A
 samRatioPATH="/s/bovine/e/nobackup/common/tools/samratio.jar"
 bowtie2PATH="/s/bovine/index/tools/bin/bowtie2/bowtie2"
 metaphlanPATH="/s/bovine/index/tools/bin/metaphlan2/"
-humann2PATH="/s/bovine/index/tools/bin/humann2/humann2/humann2.py"
-diamondPATH="/s/bovine/index/tools/bin/diamond"
 
 ## These flags determine if the kraken, metaphlan, and humann2 pipelines
 ## are run.  The keep flag determines if intermediate files are kept.
 krakenflag="False"
 metaphlanflag="False"
-humann2flag="False"
 keep="False"
 
 ## The below are default values; they will be changed by the inputs if
@@ -89,7 +84,6 @@ output_dir_nonhost="${PWD}/non_bovine_fastq/"
 output_kraken="${PWD}/analysis/microbiome/kraken/"
 kraken_report="${PWD}/analysis/microbiome/kraken/kraken_reports/"
 output_metaphlan="${PWD}/analysis/microbiome/metaphlan/"
-output_humann2="${PWD}/analysis/pathways/"
 logfile="${PWD}/logfile.txt"
 threads=1
 
@@ -115,8 +109,6 @@ validatePaths() {
     Sam Ratio:              ${samRatioPATH}
     MetaPhlAn:              ${metaphlanPATH}
     bowtie2:                ${bowtie2PATH}
-    HUMAnN2:                ${humann2PATH}
-    Diamond:                ${diamondPATH}
     
     Directories selected:
     Trimmed output:         ${output_dir_trimmed}
@@ -124,7 +116,6 @@ validatePaths() {
     Non-host output:        ${output_dir_nonhost}
     Kraken output:          ${output_kraken}
     MetaPhlAn output:       ${output_metaphlan}
-    HUMAnN2 output          ${output_humann2}
     Logfile:                ${logfile}
     
     Validating....
@@ -163,14 +154,6 @@ validatePaths() {
         local missing="$missing:SamRatio;"
     fi
     
-    if [ ! -e "${humann2PATH}" ]; then
-        local missing="$missing:HUMAnN2;"
-    fi
-    
-    if [ ! -e "${diamondPATH}" ]; then
-        local missing="$missing:Diamond;"
-    fi
-    
     if [ ! -e "${bowtie2PATH}" ]; then
         local missing="$missing:bowtie2;"
     fi
@@ -199,10 +182,7 @@ validatePaths() {
         local missing="$missing:MetaphlanOutputDir;"
     fi
     
-    if [ ! -d "${output_humann2}" ] && [ $humann2flag == "True" ]; then
-        local missing="$missing:HUMAnN2OutputDir;"
-    fi
-    
+  
     ## Check if components are missing
     if [ ! -e $missing ]; then
         echo -e "\nDirectories or Paths are missing, check the following:\n"
@@ -217,10 +197,12 @@ validatePaths() {
 validateFiles() {
     local shortpath="$2"
     local fullpath="$1"
+    local repl="$3"
+    local repl2=$(echo ${repl} | sed -r 's/R1/R2/g')
     
-    if [ ! -e ${fullpath}R1.fastq.gz ] || [ ! -e ${fullpath}R2.fastq.gz ]; then
-        echo -e "\n${fullpath}R1.fastq.gz or ${fullpath}R2.fastq.gz does not exist."
-        echo -e "\n${fullpath}R1.fastq.gz or ${fullpath}R2.fastq.gz is an invalid file" >> LabNotebook.txt
+    if [ ! -e ${fullpath}${repl} ] || [ ! -e ${fullpath}${repl2} ]; then
+        echo -e "\n${fullpath}${repl} or ${fullpath}${repl2} does not exist."
+        echo -e "\n${fullpath}${repl} or ${fullpath}${repl2} is an invalid file" >> LabNotebook.txt
         exit 1
     else
         echo -e "\nBegin pipeline for ${shortpath}" | sed 's/_$//g' >> LabNotebook.txt
@@ -246,19 +228,17 @@ getVersions() {
         ${metaphlanPATH}metaphlan2.py -v >> LabNotebook.txt
     echo -e "\nbowtie2: " >> LabNotebook.txt
         ${bowtie2PATH} --version >> LabNotebook.txt
-    echo -e "\nDiamond: " >> LabNotebook.txt
-        ${diamondPATH} -v >> LabNotebook.txt
-   # echo -e "\nHUMAnN2: " >> LabNotebook.txt
-    #    ${humann2PATH} --version >> LabNotebook.txt
 }
 
 ## Use Trimmomatic to trim the raw input reads
 trimmomatic() {
     local fullpath="$1"
     local shortpath="$2"
+    local repl="$3"
+    local repl2=$(echo ${repl} | sed -r 's/R1/R2/g')
     
-    if [ -e "${fullpath}"R1.fastq.gz ] && [ -e "${fullpath}"R2.fastq.gz ]; then
-        java -jar "${trimmPATH}trimmomatic-0.32.jar" PE -threads "${threads}" -phred33 "${fullpath}"R1.fastq.gz "${fullpath}"R2.fastq.gz "${output_dir_trimmed}${shortpath}"1P.fastq "${output_dir_trimmed}${shortpath}"1U.fastq "${output_dir_trimmed}${shortpath}"2P.fastq "${output_dir_trimmed}${shortpath}"2U.fastq ILLUMINACLIP:"${trimmPATH}adapters/TruSeq3-PE.fa:2:30:10:3:TRUE" LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+    if [ -e "${fullpath}${repl}" ] && [ -e "${fullpath}${repl2}" ]; then
+        java -jar "${trimmPATH}trimmomatic-0.32.jar" PE -threads "${threads}" -phred33 "${fullpath}${repl}" "${fullpath}${repl2}" "${output_dir_trimmed}${shortpath}"1P.fastq "${output_dir_trimmed}${shortpath}"1U.fastq "${output_dir_trimmed}${shortpath}"2P.fastq "${output_dir_trimmed}${shortpath}"2U.fastq ILLUMINACLIP:"${trimmPATH}adapters/TruSeq3-PE.fa:2:30:10:3:TRUE" LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
     else
         echo -e "\nerror: please enter a valid fastq file path\n"
         echo -e "\tTrimmomatic: Error. Pipeline stopped" >> LabNotebook.txt
@@ -511,14 +491,6 @@ metaphlanProfile() {
     
 }
 
-#humann2Profile() {
-    
-#    local shortpath="$1"
-    
-    # This is not yet implemented due to I/O considerations.  Fastq files must be concatenated before analysis, which is significant computational time.
-    #${humann2PATH}
-    
-#}
 
 setPermissions() {
     chmod 666 ${logfile} ${output_dir_trimmed}/* ${output_dir_nonhost}/* ${output_dir_amr}/* LabNotebook.txt
@@ -531,9 +503,6 @@ setPermissions() {
         chmod 666 ${output_metaphlan}/*
     fi
     
-    if [ $humann2flag == "True" ]; then
-        chmod 666 ${output_humann2}/*.tsv ${output_humann2}/*humann2*/*
-    fi
 }
 
 combineOutputs() {
@@ -543,7 +512,7 @@ combineOutputs() {
 	if [[ $stem == *"R2.fastq"* ]]; then
 	    continue
 	else
-	    local prefix=$( echo ${freads[$i]} | sed -r 's/_R1.fastq[A-Za-z0-9._\*]*//g' | sed -r 's/[A-Za-z0-9_.:\*-]*\///g' )
+	    local prefix=$( echo ${freads[$i]} | sed -r 's/[A-Za-z0-9_.:\*-]*\///g' | sed -r 's/_R1_[A-Za-z0-9_.\*]*.fastq[A-Za-z0-9._\*]*/_/g') #Remove trailing R1.fastq and leading filepath, leaving only the file name
 	    echo -e "Merging files for sample ${prefix}" >> LabNotebook.txt
 	    sed 's/$/\t'"$prefix"'/g' ${output_kraken}${prefix}_kraken_output >> ${output_kraken}master_kraken.tsv
 	    sed 's/$/\t'"$prefix"'/g'  ${kraken_report}${prefix}_kraken_reports >> ${kraken_report}master_kraken_reports.tsv
@@ -614,15 +583,6 @@ while [[ "${1+defined}"  ]]; do
             threads="$2"
             shift 2
             ;;
-	-u | --humann2)
-	    humann2flag="True"
-	    output_humann2="$2"
-	    if [ $humann2flag == "True" ]; then
-	        echo -e "\nHUMAnN2 pipeline not yet implemented, ignoring..."
-	        humann2flag="False"
-	    fi
-	    shift 2
-	    ;;
 	-tr | --trimmed)
 	    output_dir_trimmed="$2"
 	    shift 2
@@ -654,16 +614,17 @@ getVersions
 ## Run Trimmomatic on the raw input fastqs
 for i in ${!freads[*]}; do
     stem=${freads[$i]}
-    if [[ $stem == *"R2.fastq"* ]]; then
+    if [[ $stem == *"_R2_"*".fastq"* ]]; then
 	continue
     else
 	echo -e "\n=^.^=\n" #Marker for start of sample run. Meow.
-        prefix=$( echo ${freads[$i]} | sed -r 's/R1.fastq[A-Za-z0-9._\*]*//g') #Remove trailing R1.fastq
-        stem=$( echo ${freads[$i]} | sed -r 's/[A-Za-z0-9_.:\*-]*\///g' | sed -r 's/R1.fastq[A-Za-z0-9._\*]*//g') #Remove trailing R1.fastq and leading filepath, leaving only the file name stem
-        validateFiles $prefix $stem #Make sure the input files are fastq.gz and exist
+	    repl=$(echo ${freads[$i]} | grep -o -e "_R1_[A-Za-z0-9_.\*]*.fastq[A-Za-z0-9._\*]*" | sed 's/^_//g')
+        prefix=$( echo ${freads[$i]} | sed -r 's/_R1_[A-Za-z0-9_.\*]*.fastq[A-Za-z0-9._\*]*/_/g') #Remove trailing R1.fastq
+        stem=$( echo ${freads[$i]} | sed -r 's/[A-Za-z0-9_.:\*-]*\///g' | sed -r 's/_R1_[A-Za-z0-9_.\*]*.fastq[A-Za-z0-9._\*]*/_/g') #Remove trailing R1.fastq and leading filepath, leaving only the file name stem
+        validateFiles $prefix $stem $repl #Make sure the input files are fastq.gz and exist
             if [ ! -e ${output_dir_trimmed}${stem}1P.fastq ]; then
 	        echo -e "Trimming ${stem}R1.fastq.gz and ${stem}R2.fastq.gz...\n"
-	        trimmomatic $prefix $stem
+	        trimmomatic $prefix $stem $repl
                 if [ $? -ne 0 ]; then #Catch errors or SIGINTs
                     echo -e "Ctrl^C"
                     echo -e "\tTrimmomatic: Error or Command Interrupt Ctrl^C" >> LabNotebook.txt
@@ -763,7 +724,6 @@ for i in ${!freads[*]}; do
         echo -e "\tMetaPhlAn: Error. Pipeline Stopped" >> LabNotebook.txt
         exit 1
     fi
-## If the humann2 flag is set, then run humann2 on the nonhost fastqs, output to analysis/pathways folder -> not yet implemented
     echo -e "Successful completion for sample ${stem}" | sed 's/_$//g' >> LabNotebook.txt
 done
 echo -e "\nPipeline complete!\n"
