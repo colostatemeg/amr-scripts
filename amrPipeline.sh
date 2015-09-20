@@ -509,16 +509,16 @@ combineOutputs() {
     echo -e "\nMerging Files...\n"
     for i in ${!freads[*]}; do
 	local stem=${freads[$i]}
-	if [[ $stem == *"R2.fastq"* ]]; then
+	if [[ $stem == *"_R2_"*".fastq"* ]]; then
 	    continue
 	else
-	    local prefix=$( echo ${freads[$i]} | sed -r 's/[A-Za-z0-9_.:\*-]*\///g' | sed -r 's/_R1_[A-Za-z0-9_.\*]*.fastq[A-Za-z0-9._\*]*/_/g') #Remove trailing R1.fastq and leading filepath, leaving only the file name
+	    local prefix=$( echo ${freads[$i]} | sed -r 's/[A-Za-z0-9_.:\*-]*\///g' | sed -r 's/_R1_[A-Za-z0-9_.\*]*.fastq[A-Za-z0-9._\*]*/_/g')
 	    echo -e "Merging files for sample ${prefix}" >> LabNotebook.txt
-	    sed 's/$/\t'"$prefix"'/g' ${output_kraken}${prefix}_kraken_output >> ${output_kraken}master_kraken.tsv
-	    sed 's/$/\t'"$prefix"'/g'  ${kraken_report}${prefix}_kraken_reports >> ${kraken_report}master_kraken_reports.tsv
-	    sed 's/$/\t'"$prefix"'/g' ${output_dir_amr}${prefix}_parsed >> ${output_dir_amr}master_amr_parsed.tsv
-	    sed 's/$/\t'"$prefix"'/g' ${output_dir_amr}${prefix}_mismatch >> ${output_dir_amr}master_amr_mismatch.tsv
-	    sed 's/$/\t'"$prefix"'/g' ${output_metaphlan}${prefix}_metaphlan_output.tsv >> ${output_metaphlan}master_metaphlan.tsv
+	    sed 's/$/\t'"$prefix"'/g' ${output_kraken}${prefix}kraken_output >> ${output_kraken}master_kraken.tsv
+	    sed 's/$/\t'"$prefix"'/g'  ${kraken_report}${prefix}kraken_reports >> ${kraken_report}master_kraken_reports.tsv
+	    sed 's/$/\t'"$prefix"'/g' ${output_dir_amr}${prefix}parsed >> ${output_dir_amr}master_amr_parsed.tsv
+	    sed 's/$/\t'"$prefix"'/g' ${output_dir_amr}${prefix}mismatch >> ${output_dir_amr}master_amr_mismatch.tsv
+	    sed 's/$/\t'"$prefix"'/g' ${output_metaphlan}${prefix}metaphlan_output.tsv >> ${output_metaphlan}master_metaphlan.tsv
 
 	fi
     done   
