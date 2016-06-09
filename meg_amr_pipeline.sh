@@ -17,14 +17,14 @@
 # Dependencies:
 
 # Contact: Steven Lakin (Steven.Lakin@colostate.edu)
-# Last Updated: Sept 8 2015
+# Last Updated: 9 June 2016
 
 ########
 # Help #
 ########
 
 #Display help menu
-displayHelp () {
+display_help() {
     echo "
     Usage: amrPipeline.sh -i \"raw_sequence_reads/*\" [options]
 
@@ -600,6 +600,12 @@ while [[ "${1+defined}"  ]]; do
             ;;
     esac
 done
+
+## Validate that input dirs exist and programs are in paths
+validatePaths
+
+## Output the versions of the programs to LabNotebook.txt
+getVersions
 
 
 for i in ${infiles[@]}; do
